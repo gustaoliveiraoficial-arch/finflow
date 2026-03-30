@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import AppLayout from '@/components/layout/AppLayout'
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition'
-import { parseVoiceTranscript, voiceConfidenceLabel } from '@/lib/voiceParser'
+import { parseVoiceTranscript, voiceConfidenceLabel, detectWalletCreation } from '@/lib/voiceParser'
 import { createClient } from '@/lib/supabase/client'
 import type { ParsedVoice, Wallet, Category } from '@/types'
 import { formatCurrency } from '@/lib/utils'
-import { Mic, MicOff, Send, RotateCcw, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Mic, MicOff, Send, RotateCcw, CheckCircle2, AlertCircle, Wallet as WalletIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -17,6 +17,7 @@ interface Message {
   text: string
   parsed?: ParsedVoice
   saved?: boolean
+  isWalletCreation?: boolean
   timestamp: Date
 }
 
@@ -24,18 +25,19 @@ const EXAMPLES = [
   'Gastei 50 reais no mercado hoje',
   'Recebi 3000 de salário',
   'Paguei 120 de conta de luz',
-  'Comprei pizza por 45 reais',
+  'Nova carteira Negócios',
   'Entrou 500 de freelance',
 ]
 
 export default function VoicePage() {
-  const [messages, setMessages]         = useState<Message[]>([])
-  const [wallets, setWallets]           = useState<Wallet[]>([])
-  const [categories, setCategories]     = useState<Category[]>([])
+  const [messages, setMessages]             = useState<Message[]>([])
+  const [wallets, setWallets]               = useState<Wallet[]>([])
+  const [categories, setCategories]         = useState<Category[]>([])
   const [selectedWallet, setSelectedWallet] = useState<string>('')
-  const [inputText, setInputText]       = useState('')
-  const [saving, setSaving]             = useState<string | null>(null)
-  const supabase = createClient()
+  const [inputText, setInputText]           = useState('')
+  const [saving, setSaving]                 = useState<string | null>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const supabase  = createClient()
 
   const { isListening, transcript, error: speechError, start, stop } = useSpeechRecognition()
 
@@ -51,26 +53,63 @@ export default function VoicePage() {
     }
     load()
 
-    // Welcome message
     setMessages([{
       id: '0', role: 'system',
-      text: 'Olá! Diga ou escreva uma transação e eu vou entender e categorizar automaticamente. Exemplo: "Gastei 50 reais no mercado"',
+      text: 'Olá! Diga ou escreva uma transação.\nExemplo: "Gastei 50 no mercado" ou "Nova carteira Negócios"',
       timestamp: new Date(),
     }])
   }, [])
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
   function handleVoiceResult(t: string) {
     if (!t.trim()) return
     processInput(t)
   }
 
-  function processInput(text: string) {
-    const parsed = parseVoiceTranscript(text)
-    const msgId  = Date.now().toString()
+  async function processInput(text: string) {
+    const trimmed = text.trim()
+    if (!trimmed) return
+
+    const msgId = Date.now().toString()
+
+    // 1. Check for wallet creation intent first
+    const walletIntent = detectWalletCreation(trimmed)
+    if (walletIntent) {
+      setMessages(prev => [
+        ...prev,
+        { id: msgId + '-u', role: 'user', text: trimmed, timestamp: new Date() },
+        {
+          id: msgId + '-s', role: 'system',
+          text: `Criar carteira **"${walletIntent.name}"**${walletIntent.initialBalance ? ` com saldo inicial de ${formatCurrency(walletIntent.initialBalance)}` : ''}`,
+          isWalletCreation: true,
+          saved: false,
+          timestamp: new Date(),
+          parsed: { type: 'expense', amount: walletIntent.initialBalance, description: walletIntent.name, confidence: 0.95 },
+        },
+      ])
+      setInputText('')
+
+      // Auto-create wallet
+      await createWallet(msgId + '-s', walletIntent.name, walletIntent.initialBalance ?? 0)
+      return
+    }
+
+    // 2. Parse as transaction
+    const parsed = parseVoiceTranscript(trimmed)
+
+    // Ensure we have a wallet — create default if none
+    let walletId = selectedWallet
+    if (!walletId && wallets.length === 0) {
+      walletId = await ensureDefaultWallet()
+    }
 
     setMessages(prev => [
       ...prev,
-      { id: msgId + '-u', role: 'user', text, timestamp: new Date() },
+      { id: msgId + '-u', role: 'user', text: trimmed, timestamp: new Date() },
       {
         id: msgId + '-s', role: 'system',
         text: buildResponseText(parsed),
@@ -80,6 +119,56 @@ export default function VoicePage() {
       },
     ])
     setInputText('')
+
+    // Auto-save when confidence is high (amount + type detected)
+    if (parsed.confidence >= 0.9 && parsed.amount && walletId) {
+      await saveTransaction(msgId + '-s', parsed, walletId, true)
+    }
+  }
+
+  async function ensureDefaultWallet(): Promise<string> {
+    const { data: user } = await supabase.auth.getUser()
+    if (!user.user) return ''
+
+    const { data, error } = await supabase.from('wallets').insert({
+      name: 'Carteira Principal',
+      type: 'checking',
+      balance: 0,
+      color: '#35976b',
+      currency: 'BRL',
+      is_active: true,
+    }).select().single()
+
+    if (error || !data) return ''
+    setWallets(prev => [...prev, data])
+    setSelectedWallet(data.id)
+    toast('Carteira Principal criada automaticamente', { icon: '💳' })
+    return data.id
+  }
+
+  async function createWallet(msgId: string, name: string, initialBalance: number) {
+    setSaving(msgId)
+    try {
+      const { data, error } = await supabase.from('wallets').insert({
+        name,
+        type: 'checking',
+        balance: initialBalance,
+        color: '#35976b',
+        currency: 'BRL',
+        is_active: true,
+      }).select().single()
+
+      if (error) throw error
+
+      setWallets(prev => [...prev, data])
+      if (!selectedWallet) setSelectedWallet(data.id)
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, saved: true } : m))
+      toast.success(`Carteira "${name}" criada!`)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao criar carteira')
+    } finally {
+      setSaving(null)
+    }
   }
 
   function buildResponseText(p: ParsedVoice): string {
@@ -87,41 +176,47 @@ export default function VoicePage() {
     const parts = [
       `Entendi: **${p.type === 'income' ? 'Entrada' : 'Saída'}** de **${p.amount ? formatCurrency(p.amount) : 'valor não identificado'}**`,
       p.description && `Descrição: ${p.description}`,
-      p.category  && `Categoria: ${p.category}`,
+      p.category    && `Categoria: ${p.category}`,
       `Confiança: ${label}`,
     ].filter(Boolean)
     return parts.join('\n')
   }
 
-  async function saveTransaction(msgId: string, parsed: ParsedVoice) {
-    if (!parsed.amount || !selectedWallet) {
-      toast.error('Valor ou carteira não identificados. Edite antes de salvar.')
+  async function saveTransaction(msgId: string, parsed: ParsedVoice, walletId?: string, auto = false) {
+    const wid = walletId ?? selectedWallet
+
+    if (!parsed.amount) {
+      toast.error('Valor não identificado. Tente: "Gastei 50 no mercado"')
       return
     }
+    if (!wid) {
+      toast.error('Nenhuma carteira disponível. Crie uma primeiro.')
+      return
+    }
+
     setSaving(msgId)
     try {
       const category = categories.find(c => c.name === parsed.category)
-      const wallet   = wallets.find(w => w.id === selectedWallet)
+      const wallet   = wallets.find(w => w.id === wid)
 
       const { error } = await supabase.from('transactions').insert({
         type:        parsed.type ?? 'expense',
         amount:      parsed.amount,
         description: parsed.description ?? 'Transação por voz',
         date:        parsed.date ?? new Date().toISOString().slice(0, 10),
-        wallet_id:   selectedWallet,
+        wallet_id:   wid,
         category_id: category?.id ?? null,
         source:      'voice',
         is_paid:     true,
       })
       if (error) throw error
 
-      // Update wallet balance
       if (wallet) {
         const delta = parsed.type === 'income' ? parsed.amount : -parsed.amount
         await supabase.from('wallets').update({ balance: wallet.balance + delta }).eq('id', wallet.id)
+        setWallets(prev => prev.map(w => w.id === wid ? { ...w, balance: w.balance + delta } : w))
       }
 
-      // Save voice log
       await supabase.from('voice_logs').insert({
         transcript: messages.find(m => m.id === msgId.replace('-s', '-u'))?.text ?? '',
         parsed,
@@ -129,10 +224,12 @@ export default function VoicePage() {
       })
 
       setMessages(prev => prev.map(m => m.id === msgId ? { ...m, saved: true } : m))
-      toast.success('Transação salva com sucesso!')
+      toast.success(auto ? '✅ Registrado automaticamente!' : 'Transação salva!')
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Erro ao salvar')
-    } finally { setSaving(null) }
+    } finally {
+      setSaving(null)
+    }
   }
 
   return (
@@ -140,15 +237,20 @@ export default function VoicePage() {
       <div className="max-w-2xl mx-auto">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-white">Chat de Voz</h1>
-          <p className="text-sm text-gray-400">Dite ou escreva e o FinFlow entende automaticamente</p>
+          <p className="text-sm text-gray-400">Dite ou escreva — o FinFlow registra automaticamente</p>
         </div>
 
         {/* Wallet selector */}
         <div className="card p-4 mb-4 flex items-center gap-3">
-          <label className="text-sm text-gray-400 flex-shrink-0">Carteira padrão:</label>
-          <select className="select flex-1 py-2" value={selectedWallet} onChange={e => setSelectedWallet(e.target.value)}>
-            {wallets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-          </select>
+          <WalletIcon className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <label className="text-sm text-gray-400 flex-shrink-0">Carteira:</label>
+          {wallets.length === 0 ? (
+            <span className="text-sm text-gray-500 italic flex-1">Nenhuma carteira — será criada automaticamente</span>
+          ) : (
+            <select className="select flex-1 py-2" value={selectedWallet} onChange={e => setSelectedWallet(e.target.value)}>
+              {wallets.map(w => <option key={w.id} value={w.id}>{w.name} — {formatCurrency(w.balance)}</option>)}
+            </select>
+          )}
         </div>
 
         {/* Messages */}
@@ -168,7 +270,8 @@ export default function VoicePage() {
                     }} />
                   ))}
 
-                  {msg.parsed && !msg.saved && (
+                  {/* Manual save button — only shown when not auto-saved */}
+                  {msg.parsed && !msg.saved && !msg.isWalletCreation && (
                     <button
                       onClick={() => saveTransaction(msg.id, msg.parsed!)}
                       disabled={saving === msg.id}
@@ -178,6 +281,7 @@ export default function VoicePage() {
                       {saving === msg.id ? 'Salvando...' : 'Confirmar e Salvar'}
                     </button>
                   )}
+
                   {msg.saved && (
                     <div className="mt-2 flex items-center gap-1.5 text-income text-xs">
                       <CheckCircle2 className="w-3.5 h-3.5" /> Salvo!
@@ -187,7 +291,6 @@ export default function VoicePage() {
               </div>
             ))}
 
-            {/* Interim transcript */}
             {isListening && transcript && (
               <div className="flex justify-end">
                 <div className="max-w-xs rounded-2xl px-4 py-3 bg-brand-600/50 text-white text-sm italic">
@@ -195,10 +298,10 @@ export default function VoicePage() {
                 </div>
               </div>
             )}
+            <div ref={bottomRef} />
           </div>
         </div>
 
-        {/* Error */}
         {speechError && (
           <div className="flex items-center gap-2 text-sm text-expense mb-3 px-2">
             <AlertCircle className="w-4 h-4" /> {speechError}
@@ -252,6 +355,10 @@ export default function VoicePage() {
             </button>
           )}
         </div>
+
+        <p className="text-xs text-center text-gray-600 mt-3">
+          Alta confiança = registro automático · Baixa confiança = confirmação manual
+        </p>
       </div>
     </AppLayout>
   )
