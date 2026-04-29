@@ -6,13 +6,13 @@ import { Toaster } from 'react-hot-toast'
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 
 export const metadata: Metadata = {
-  title: 'FinFlow — Controle Financeiro',
-  description: 'Seu controle financeiro pessoal inteligente. Gerencie gastos, entradas e carteiras em um só lugar.',
+  title: 'Amigão 2.0',
+  description: 'Seu assistente pessoal inteligente — finanças, tarefas, saúde e IA em um só lugar.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'FinFlow',
+    title: 'Amigão 2.0',
   },
   icons: {
     icon: '/icons/icon-192.png',

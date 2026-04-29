@@ -1,15 +1,14 @@
--- FinFlow — Schema Supabase
--- Execute este SQL no SQL Editor do seu projeto Supabase
+-- Amigão 2.0 — Schema Supabase
+-- App pessoal, sem autenticação — use device_id como identificador
 
--- Extensões
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ==========================================
--- WALLETS (Carteiras / Contas)
+-- WALLETS (Carteiras)
 -- ==========================================
 CREATE TABLE IF NOT EXISTS wallets (
   id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  device_id   TEXT NOT NULL,
   name        TEXT NOT NULL,
   type        TEXT NOT NULL CHECK (type IN ('checking','savings','investment','cash','business','credit')),
   color       TEXT NOT NULL DEFAULT '#35976b',
@@ -27,7 +26,7 @@ CREATE TABLE IF NOT EXISTS wallets (
 -- ==========================================
 CREATE TABLE IF NOT EXISTS categories (
   id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id    UUID REFERENCES auth.users(id) ON DELETE CASCADE, -- NULL = categoria padrão do sistema
+  device_id  TEXT,
   name       TEXT NOT NULL,
   type       TEXT NOT NULL CHECK (type IN ('income','expense')),
   icon       TEXT NOT NULL DEFAULT 'tag',
@@ -35,21 +34,20 @@ CREATE TABLE IF NOT EXISTS categories (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Categorias padrão do sistema
 INSERT INTO categories (id, name, type, icon, color) VALUES
-  (uuid_generate_v4(), 'Salário',       'income',  'briefcase',    '#22d3a4'),
-  (uuid_generate_v4(), 'Freelance',     'income',  'laptop',       '#34d399'),
-  (uuid_generate_v4(), 'Investimentos', 'income',  'trending-up',  '#6ee7b7'),
-  (uuid_generate_v4(), 'Outros (entrada)', 'income','plus-circle', '#a7f3d0'),
-  (uuid_generate_v4(), 'Alimentação',   'expense', 'utensils',     '#f87171'),
-  (uuid_generate_v4(), 'Moradia',       'expense', 'home',         '#fb923c'),
-  (uuid_generate_v4(), 'Transporte',    'expense', 'car',          '#fbbf24'),
-  (uuid_generate_v4(), 'Saúde',         'expense', 'heart',        '#f472b6'),
-  (uuid_generate_v4(), 'Educação',      'expense', 'book-open',    '#a78bfa'),
-  (uuid_generate_v4(), 'Lazer',         'expense', 'gamepad-2',    '#60a5fa'),
-  (uuid_generate_v4(), 'Vestuário',     'expense', 'shirt',        '#f9a8d4'),
-  (uuid_generate_v4(), 'Assinaturas',   'expense', 'repeat',       '#818cf8'),
-  (uuid_generate_v4(), 'Outros (saída)','expense', 'minus-circle', '#94a3b8')
+  (uuid_generate_v4(), 'Salário',           'income',  'briefcase',    '#22d3a4'),
+  (uuid_generate_v4(), 'Freelance',         'income',  'laptop',       '#34d399'),
+  (uuid_generate_v4(), 'Investimentos',     'income',  'trending-up',  '#6ee7b7'),
+  (uuid_generate_v4(), 'Outros (entrada)',  'income',  'plus-circle',  '#a7f3d0'),
+  (uuid_generate_v4(), 'Alimentação',       'expense', 'utensils',     '#f87171'),
+  (uuid_generate_v4(), 'Moradia',           'expense', 'home',         '#fb923c'),
+  (uuid_generate_v4(), 'Transporte',        'expense', 'car',          '#fbbf24'),
+  (uuid_generate_v4(), 'Saúde',             'expense', 'heart',        '#f472b6'),
+  (uuid_generate_v4(), 'Educação',          'expense', 'book-open',    '#a78bfa'),
+  (uuid_generate_v4(), 'Lazer',             'expense', 'gamepad-2',    '#60a5fa'),
+  (uuid_generate_v4(), 'Vestuário',         'expense', 'shirt',        '#f9a8d4'),
+  (uuid_generate_v4(), 'Assinaturas',       'expense', 'repeat',       '#818cf8'),
+  (uuid_generate_v4(), 'Outros (saída)',    'expense', 'minus-circle', '#94a3b8')
 ON CONFLICT DO NOTHING;
 
 -- ==========================================
@@ -57,7 +55,7 @@ ON CONFLICT DO NOTHING;
 -- ==========================================
 CREATE TABLE IF NOT EXISTS transactions (
   id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id        UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  device_id      TEXT NOT NULL,
   wallet_id      UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
   category_id    UUID REFERENCES categories(id) ON DELETE SET NULL,
   type           TEXT NOT NULL CHECK (type IN ('income','expense','transfer')),
@@ -69,17 +67,17 @@ CREATE TABLE IF NOT EXISTS transactions (
   recurrence_end DATE,
   is_paid        BOOLEAN NOT NULL DEFAULT TRUE,
   notes          TEXT,
-  source         TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual','voice','import')),
+  source         TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual','ai','import')),
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ==========================================
--- BILLS (Próximas Contas a Pagar)
+-- BILLS (Contas a Pagar — recorrentes)
 -- ==========================================
 CREATE TABLE IF NOT EXISTS bills (
   id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  device_id   TEXT NOT NULL,
   category_id UUID REFERENCES categories(id) ON DELETE SET NULL,
   name        TEXT NOT NULL,
   amount      NUMERIC(12,2) NOT NULL,
@@ -92,76 +90,67 @@ CREATE TABLE IF NOT EXISTS bills (
 );
 
 -- ==========================================
+-- RECEIVABLES (Contas a Receber)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS receivables (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  device_id    TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  amount       NUMERIC(12,2) NOT NULL,
+  due_date     DATE NOT NULL,
+  is_received  BOOLEAN NOT NULL DEFAULT FALSE,
+  notes        TEXT,
+  color        TEXT NOT NULL DEFAULT '#22d3a4',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ==========================================
+-- TASKS (Tarefas)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS tasks (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  device_id   TEXT NOT NULL,
+  title       TEXT NOT NULL,
+  description TEXT,
+  due_date    DATE,
+  due_time    TIME,
+  priority    TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low','medium','high')),
+  category    TEXT NOT NULL DEFAULT 'pessoal' CHECK (category IN ('pessoal','trabalho','saude','financeiro','outro')),
+  is_done     BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ==========================================
+-- HEALTH LOGS (Registro de Saúde)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS health_logs (
+  id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  device_id  TEXT NOT NULL,
+  type       TEXT NOT NULL CHECK (type IN ('water','gym','sleep')),
+  value      NUMERIC(5,2) NOT NULL DEFAULT 1,
+  logged_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  note       TEXT
+);
+
+-- ==========================================
 -- NOTIFICATIONS (Notificações)
 -- ==========================================
 CREATE TABLE IF NOT EXISTS notifications (
   id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  device_id  TEXT NOT NULL,
   title      TEXT NOT NULL,
   body       TEXT NOT NULL,
-  type       TEXT NOT NULL CHECK (type IN ('bill_due','budget_alert','tip','system')),
+  type       TEXT NOT NULL CHECK (type IN ('bill_due','receivable_due','task_reminder','health','system')),
   is_read    BOOLEAN NOT NULL DEFAULT FALSE,
   data       JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ==========================================
--- PUSH SUBSCRIPTIONS (Web Push)
+-- Sem RLS — app pessoal, filtro por device_id na aplicação
 -- ==========================================
-CREATE TABLE IF NOT EXISTS push_subscriptions (
-  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id      UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  endpoint     TEXT NOT NULL UNIQUE,
-  p256dh       TEXT NOT NULL,
-  auth         TEXT NOT NULL,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ==========================================
--- VOICE LOGS (Entradas de Voz)
--- ==========================================
-CREATE TABLE IF NOT EXISTS voice_logs (
-  id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id        UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  transcript     TEXT NOT NULL,
-  parsed         JSONB,
-  transaction_id UUID REFERENCES transactions(id) ON DELETE SET NULL,
-  status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','processed','failed')),
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ==========================================
--- ROW LEVEL SECURITY
--- ==========================================
-ALTER TABLE wallets           ENABLE ROW LEVEL SECURITY;
-ALTER TABLE categories        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE transactions      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE bills             ENABLE ROW LEVEL SECURITY;
-ALTER TABLE notifications     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE voice_logs        ENABLE ROW LEVEL SECURITY;
-
--- Wallets
-CREATE POLICY "users_own_wallets" ON wallets FOR ALL USING (auth.uid() = user_id);
-
--- Categories: leitura de categorias do sistema + próprias
-CREATE POLICY "users_read_categories" ON categories FOR SELECT USING (user_id IS NULL OR auth.uid() = user_id);
-CREATE POLICY "users_manage_categories" ON categories FOR ALL USING (auth.uid() = user_id);
-
--- Transactions
-CREATE POLICY "users_own_transactions" ON transactions FOR ALL USING (auth.uid() = user_id);
-
--- Bills
-CREATE POLICY "users_own_bills" ON bills FOR ALL USING (auth.uid() = user_id);
-
--- Notifications
-CREATE POLICY "users_own_notifications" ON notifications FOR ALL USING (auth.uid() = user_id);
-
--- Push subscriptions
-CREATE POLICY "users_own_push" ON push_subscriptions FOR ALL USING (auth.uid() = user_id);
-
--- Voice logs
-CREATE POLICY "users_own_voice" ON voice_logs FOR ALL USING (auth.uid() = user_id);
 
 -- ==========================================
 -- UPDATED_AT trigger
@@ -171,14 +160,24 @@ RETURNS TRIGGER AS $$
 BEGIN NEW.updated_at = NOW(); RETURN NEW; END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_wallets_updated      ON wallets;
+DROP TRIGGER IF EXISTS trg_transactions_updated ON transactions;
+DROP TRIGGER IF EXISTS trg_bills_updated        ON bills;
+DROP TRIGGER IF EXISTS trg_receivables_updated  ON receivables;
+DROP TRIGGER IF EXISTS trg_tasks_updated        ON tasks;
+
 CREATE TRIGGER trg_wallets_updated      BEFORE UPDATE ON wallets      FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 CREATE TRIGGER trg_transactions_updated BEFORE UPDATE ON transactions  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 CREATE TRIGGER trg_bills_updated        BEFORE UPDATE ON bills         FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE TRIGGER trg_receivables_updated  BEFORE UPDATE ON receivables   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE TRIGGER trg_tasks_updated        BEFORE UPDATE ON tasks         FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ==========================================
--- INDEXES para performance
+-- INDEXES
 -- ==========================================
-CREATE INDEX IF NOT EXISTS idx_transactions_user_date   ON transactions(user_id, date DESC);
-CREATE INDEX IF NOT EXISTS idx_transactions_wallet      ON transactions(wallet_id);
-CREATE INDEX IF NOT EXISTS idx_bills_user              ON bills(user_id, is_active);
-CREATE INDEX IF NOT EXISTS idx_notifications_user_read  ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_transactions_device_date  ON transactions(device_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_bills_device              ON bills(device_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_receivables_device_date   ON receivables(device_id, due_date);
+CREATE INDEX IF NOT EXISTS idx_tasks_device_due          ON tasks(device_id, due_date);
+CREATE INDEX IF NOT EXISTS idx_health_logs_device_type   ON health_logs(device_id, type, logged_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_device      ON notifications(device_id, is_read);

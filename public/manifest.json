@@ -1,13 +1,13 @@
 {
-  "name": "FinFlow — Controle Financeiro",
-  "short_name": "FinFlow",
-  "description": "Seu controle financeiro pessoal inteligente",
+  "name": "Amigão 2.0",
+  "short_name": "Amigão",
+  "description": "Seu assistente pessoal inteligente — finanças, tarefas, saúde e IA",
   "start_url": "/dashboard",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#0f1117",
   "theme_color": "#0f1117",
-  "categories": ["finance", "productivity"],
+  "categories": ["finance", "productivity", "health"],
   "icons": [
     { "src": "/icons/icon-72.png",   "sizes": "72x72",   "type": "image/png", "purpose": "any maskable" },
     { "src": "/icons/icon-96.png",   "sizes": "96x96",   "type": "image/png", "purpose": "any maskable" },
@@ -18,29 +18,33 @@
     { "src": "/icons/icon-384.png",  "sizes": "384x384", "type": "image/png", "purpose": "any maskable" },
     { "src": "/icons/icon-512.png",  "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ],
-  "screenshots": [
-    { "src": "/screenshots/dashboard.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow" }
-  ],
   "shortcuts": [
     {
-      "name": "Adicionar Gasto",
+      "name": "Novo Gasto",
       "short_name": "Gasto",
       "description": "Registrar nova despesa",
-      "url": "/expenses?action=new&type=expense",
+      "url": "/financeiro",
       "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
     },
     {
-      "name": "Adicionar Entrada",
-      "short_name": "Entrada",
-      "description": "Registrar nova receita",
-      "url": "/expenses?action=new&type=income",
+      "name": "Nova Tarefa",
+      "short_name": "Tarefa",
+      "description": "Adicionar nova tarefa",
+      "url": "/tarefas",
       "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
     },
     {
-      "name": "Chat de Voz",
-      "short_name": "Voz",
-      "description": "Registrar por voz",
-      "url": "/voice",
+      "name": "Beber Água",
+      "short_name": "Água",
+      "description": "Registrar copo de água",
+      "url": "/saude",
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Assistente IA",
+      "short_name": "Amigão",
+      "description": "Falar com o Amigão 2.0",
+      "url": "/assistente",
       "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
     }
   ]

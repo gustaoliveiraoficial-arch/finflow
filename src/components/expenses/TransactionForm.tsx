@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getDeviceId } from '@/hooks/useDeviceId'
 import type { Transaction, Wallet, Category } from '@/types'
 import toast from 'react-hot-toast'
 
@@ -13,9 +14,9 @@ interface TransactionFormProps {
 }
 
 export default function TransactionForm({ transaction, onSuccess, onCancel, defaultType = 'expense' }: TransactionFormProps) {
-  const [wallets, setWallets]     = useState<Wallet[]>([])
+  const [wallets, setWallets]       = useState<Wallet[]>([])
   const [categories, setCategories] = useState<Category[]>([])
-  const [loading, setLoading]     = useState(false)
+  const [loading, setLoading]       = useState(false)
   const [form, setForm] = useState({
     type:        transaction?.type        ?? defaultType,
     amount:      transaction?.amount?.toString() ?? '',
@@ -29,12 +30,12 @@ export default function TransactionForm({ transaction, onSuccess, onCancel, defa
     notes:       transaction?.notes       ?? '',
   })
 
-  const supabase = createClient()
-
   useEffect(() => {
     async function load() {
+      const supabase = createClient()
+      const deviceId = getDeviceId()
       const [{ data: w }, { data: c }] = await Promise.all([
-        supabase.from('wallets').select('*').eq('is_active', true),
+        supabase.from('wallets').select('*').eq('device_id', deviceId).eq('is_active', true),
         supabase.from('categories').select('*').order('name'),
       ])
       setWallets(w ?? [])
@@ -42,9 +43,10 @@ export default function TransactionForm({ transaction, onSuccess, onCancel, defa
       if (!form.wallet_id && w?.length) setForm(f => ({ ...f, wallet_id: w[0].id }))
     }
     load()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const filteredCategories = categories.filter(c => !c.user_id || c.type === form.type)
+  const filteredCategories = categories.filter(c => c.type === form.type)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -53,11 +55,20 @@ export default function TransactionForm({ transaction, onSuccess, onCancel, defa
       return
     }
     setLoading(true)
+    const supabase = createClient()
+    const deviceId = getDeviceId()
     const payload = {
-      ...form,
+      device_id:   deviceId,
+      type:        form.type,
       amount:      parseFloat(form.amount),
+      description: form.description,
+      date:        form.date,
+      wallet_id:   form.wallet_id,
       category_id: form.category_id || null,
+      is_recurring: form.is_recurring,
       recurrence:  form.is_recurring ? form.recurrence : null,
+      is_paid:     form.is_paid,
+      notes:       form.notes || null,
     }
     try {
       if (transaction) {
@@ -67,7 +78,7 @@ export default function TransactionForm({ transaction, onSuccess, onCancel, defa
       } else {
         const { error } = await supabase.from('transactions').insert(payload)
         if (error) throw error
-        // Update wallet balance
+        // Atualizar saldo da carteira
         const wallet = wallets.find(w => w.id === form.wallet_id)
         if (wallet) {
           const delta = form.type === 'income' ? parseFloat(form.amount) : -parseFloat(form.amount)
@@ -85,7 +96,7 @@ export default function TransactionForm({ transaction, onSuccess, onCancel, defa
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {/* Type toggle */}
+      {/* Tipo */}
       <div className="flex rounded-xl border border-surface-border overflow-hidden">
         {(['expense', 'income'] as const).map(t => (
           <button key={t} type="button"
